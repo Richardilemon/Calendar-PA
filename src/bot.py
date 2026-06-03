@@ -1,4 +1,10 @@
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.setup import setup_google_credentials
+setup_google_credentials()
+
 import json
 import logging
 import asyncio
