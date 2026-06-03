@@ -21,6 +21,9 @@ import anthropic
 
 load_dotenv()
 
+# your Telegram user ID — get it by messaging @userinfobot on Telegram
+ALLOWED_USER_IDS = set(6238440343)  # leave empty to allow all, or add your ID
+
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_API_KEY")
 MCP_SERVER_PATH    = os.getenv(
@@ -175,7 +178,13 @@ async def handle_message_with_text(
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle regular text messages"""
+    if ALLOWED_USER_IDS and update.effective_user.id not in ALLOWED_USER_IDS:
+        await update.message.reply_text(
+            "This is a private demo instance.\n\n"
+            "To use Calendar PA, self-host your own instance:\n"
+            "github.com/Richardilemon/calendar-pa"
+        )
+        return
     await handle_message_with_text(update, context, update.message.text)
 
 
