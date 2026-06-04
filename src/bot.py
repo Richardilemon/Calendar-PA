@@ -22,7 +22,7 @@ import anthropic
 load_dotenv()
 
 # your Telegram user ID — get it by messaging @userinfobot on Telegram
-ALLOWED_USER_IDS = set(6238440343)  # leave empty to allow all, or add your ID
+ALLOWED_USER_IDS = {6238440343}  # leave empty to allow all, or add your ID
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ANTHROPIC_API_KEY  = os.getenv("ANTHROPIC_API_KEY")

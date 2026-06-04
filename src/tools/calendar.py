@@ -152,17 +152,12 @@ async def handle_create_event(args: dict) -> str:
 
 
 async def handle_update_event(args: dict) -> str:
-    """
-    Update an existing event — reschedule, rename, change duration.
-    Requires event_id. All other fields are optional.
-    """
     event_id = args.get("event_id")
     if not event_id:
         return json.dumps({"error": "event_id is required."})
 
     svc = get_calendar_service()
 
-    # fetch the existing event first
     try:
         event = svc.events().get(
             calendarId=CALENDAR_ID,
@@ -171,25 +166,24 @@ async def handle_update_event(args: dict) -> str:
     except Exception as e:
         return json.dumps({"error": f"Event not found: {str(e)}"})
 
-    # apply updates — only change what was provided
     if "title" in args:
         event["summary"] = args["title"]
-
     if "description" in args:
         event["description"] = args["description"]
-
     if "location" in args:
         event["location"] = args["location"]
 
     if "start" in args:
         from datetime import timedelta
+        try:
+            start_dt = datetime.fromisoformat(args["start"])
+        except ValueError:
+            return json.dumps({"error": f"Invalid start time: {args['start']}. Use ISO 8601."})
 
-        start_dt = datetime.fromisoformat(args["start"])
         duration = args.get("duration_minutes", 60)
         end_dt   = start_dt + timedelta(minutes=duration)
         tz       = args.get("timezone", "Africa/Lagos")
 
-        # conflict detection — exclude the event being updated
         conflict_check = svc.events().list(
             calendarId=CALENDAR_ID,
             timeMin=start_dt.isoformat() + "Z" if start_dt.tzinfo is None else start_dt.isoformat(),
@@ -200,14 +194,14 @@ async def handle_update_event(args: dict) -> str:
 
         conflicts = [
             e for e in conflict_check.get("items", [])
-            if e["id"] != event_id  # exclude the event itself
+            if e["id"] != event_id
         ]
 
         if conflicts:
             conflict_titles = [e.get("summary", "Untitled") for e in conflicts]
             return json.dumps({
-                "error":   "conflict_detected",
-                "message": f"New time conflicts with: {', '.join(conflict_titles)}.",
+                "error":     "conflict_detected",
+                "message":   f"New time conflicts with: {', '.join(conflict_titles)}.",
                 "conflicts": [_format_event(e) for e in conflicts]
             })
 
@@ -217,22 +211,22 @@ async def handle_update_event(args: dict) -> str:
     if "reminder_minutes" in args:
         event["reminders"] = {
             "useDefault": False,
-            "overrides": [
-                {"method": "popup", "minutes": args["reminder_minutes"]}
-            ]
+            "overrides": [{"method": "popup", "minutes": args["reminder_minutes"]}]
         }
 
-    updated = svc.events().update(
-        calendarId=CALENDAR_ID,
-        eventId=event_id,
-        body=event
-    ).execute()
-
-    return json.dumps({
-        "success": True,
-        "message": f"Event updated successfully.",
-        "event":   _format_event(updated)
-    }, default=str)
+    try:
+        updated = svc.events().update(
+            calendarId=CALENDAR_ID,
+            eventId=event_id,
+            body=event
+        ).execute()
+        return json.dumps({
+            "success": True,
+            "message": "Event updated successfully.",
+            "event":   _format_event(updated)
+        }, default=str)
+    except Exception as e:
+        return json.dumps({"error": f"Failed to update event: {str(e)}"})
 
 
 async def handle_delete_event(args: dict) -> str:
@@ -277,12 +271,9 @@ async def handle_delete_event(args: dict) -> str:
     
 
 async def handle_set_reminder(args: dict) -> str:
-    """
-    Add or update a reminder on an existing event.
-    """
-    event_id        = args.get("event_id")
+    event_id         = args.get("event_id")
     reminder_minutes = args.get("reminder_minutes", 30)
-    method          = args.get("method", "popup")  # popup or email
+    method           = args.get("method", "popup")
 
     if not event_id:
         return json.dumps({"error": "event_id is required."})
@@ -290,8 +281,10 @@ async def handle_set_reminder(args: dict) -> str:
     if method not in ("popup", "email"):
         return json.dumps({"error": "method must be 'popup' or 'email'."})
 
-    svc = get_calendar_service()
+    if not isinstance(reminder_minutes, int) or reminder_minutes < 0:
+        return json.dumps({"error": "reminder_minutes must be a positive integer."})
 
+    svc = get_calendar_service()
     try:
         event = svc.events().get(
             calendarId=CALENDAR_ID,
@@ -302,22 +295,22 @@ async def handle_set_reminder(args: dict) -> str:
 
     event["reminders"] = {
         "useDefault": False,
-        "overrides": [
-            {"method": method, "minutes": reminder_minutes}
-        ]
+        "overrides": [{"method": method, "minutes": reminder_minutes}]
     }
 
-    updated = svc.events().update(
-        calendarId=CALENDAR_ID,
-        eventId=event_id,
-        body=event
-    ).execute()
-
-    return json.dumps({
-        "success": True,
-        "message": f"Reminder set — {reminder_minutes} minutes before via {method}.",
-        "event":   _format_event(updated)
-    }, default=str)
+    try:
+        updated = svc.events().update(
+            calendarId=CALENDAR_ID,
+            eventId=event_id,
+            body=event
+        ).execute()
+        return json.dumps({
+            "success": True,
+            "message": f"Reminder set — {reminder_minutes} minutes before via {method}.",
+            "event":   _format_event(updated)
+        }, default=str)
+    except Exception as e:
+        return json.dumps({"error": f"Failed to update reminder: {str(e)}"})
 
 
 async def handle_find_free_slot(args: dict, ctx=None) -> str:

@@ -366,12 +366,12 @@ async def read_resource(uri: str) -> str:
 @app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     handlers = {
-        "get_events":      handle_get_events,
-        "create_event":    handle_create_event,
-        "update_event":    handle_update_event,
-        "delete_event":    handle_delete_event,
-        "set_reminder":    handle_set_reminder,
-        "find_free_slot":  handle_find_free_slot,
+        "get_events":             handle_get_events,
+        "create_event":           handle_create_event,
+        "update_event":           handle_update_event,
+        "delete_event":           handle_delete_event,
+        "set_reminder":           handle_set_reminder,
+        "find_free_slot":         handle_find_free_slot,
         "create_recurring_event": handle_create_recurring_event,
         "get_session_context":    handle_get_session_context,
         "update_session_context": handle_update_session_context,
@@ -379,13 +379,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     handler = handlers.get(name)
     if not handler:
-        raise ValueError(f"Unknown tool: {name}")
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": f"Unknown tool: {name}"})
+        )]
 
     start = time.time()
     try:
         logger.info(json.dumps({"tool": name, "status": "started"}))
 
-        # pass context to handlers that support it
         import inspect
         sig = inspect.signature(handler)
         if "ctx" in sig.parameters:
@@ -401,8 +403,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     except Exception as e:
         tool_stats[name]["errors"] += 1
+        error_msg = f"Tool '{name}' failed: {str(e)}"
         logger.error(json.dumps({"tool": name, "status": "error", "error": str(e)}))
-        raise
+        return [types.TextContent(
+            type="text",
+            text=json.dumps({"error": error_msg})
+        )]
 
 
 async def main():
