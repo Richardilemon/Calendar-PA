@@ -2,8 +2,9 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.setup import setup_google_credentials
+from src.setup import setup_google_credentials, refresh_google_token
 setup_google_credentials()
+refresh_google_token()
 
 import json
 import logging
@@ -46,12 +47,32 @@ anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # System prompt for the calendar PA
 def get_system_prompt() -> str:
-    from datetime import datetime, timezone
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return f"""You are Calendar PA, a smart personal calendar assistant. 
+    from datetime import datetime, timezone, timedelta
+    now   = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    day   = now.strftime("%A")
+
+    # generate next 14 days so Claude never has to calculate dates
+    days_list = []
+    for i in range(14):
+        d = now + timedelta(days=i)
+        days_list.append(f"{d.strftime('%A')} = {d.strftime('%Y-%m-%d')}")
+    days_reference = "\n".join(days_list)
+
+    return f"""You are Calendar PA, a smart personal calendar assistant.
 You have access to the user's Google Calendar through MCP tools.
 
-TODAY'S DATE IS {today}. This is the REAL current date. ALWAYS use this date.
+TODAY IS {day}, {today}.
+
+EXACT DATE REFERENCE — use these dates, never calculate your own:
+{days_reference}
+
+CRITICAL DATE RULES:
+- ONLY use dates from the reference above
+- Never say "this Friday" without checking the reference first
+- When creating recurring events, the start date MUST match the correct day from the reference
+- Before creating a recurring event, ALWAYS call get_events first to check if a similar series already exists
+- When creating recurring events, use exact ISO 8601 dates, not day names
 
 CRITICAL RULES:
 - NEVER answer calendar questions from memory or assumptions
@@ -218,7 +239,7 @@ def _sync_claude_call(messages: list) -> str:
 
     for _ in range(max_iterations):
         response = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=1000,
             system=get_system_prompt(),
             tools=tools,

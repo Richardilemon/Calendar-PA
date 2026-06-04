@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from src.auth import get_calendar_service
 from dotenv import load_dotenv
 import os
@@ -426,25 +426,25 @@ async def handle_create_recurring_event(args: dict, ctx=None) -> str:
     Create a recurring event with complex recurrence rules.
     Uses sampling to parse natural language recurrence into RRULE.
     """
-    title            = args["title"]
-    start            = args["start"]
-    duration         = args.get("duration_minutes", 60)
-    recurrence_desc  = args["recurrence"]
-    description      = args.get("description", "")
-    location         = args.get("location", "")
-    timezone         = args.get("timezone", "Africa/Lagos")
-    end_condition    = args.get("end_condition", "")
+    import re
+    from datetime import timedelta
 
-    # parse start time
+    title           = args["title"]
+    start           = args["start"]
+    duration        = args.get("duration_minutes", 60)
+    recurrence_desc = args["recurrence"]
+    description     = args.get("description", "")
+    location        = args.get("location", "")
+    tz              = args.get("timezone", "Africa/Lagos")
+    end_condition   = args.get("end_condition", "")
+
+    # 1. parse start time
     try:
         start_dt = datetime.fromisoformat(start)
     except ValueError:
         return json.dumps({"error": f"Invalid start time: {start}. Use ISO 8601."})
 
-    from datetime import timedelta
-    end_dt = start_dt + timedelta(minutes=duration)
-
-    # use sampling to convert natural language recurrence to RRULE
+    # 2. generate RRULE via sampling
     rrule = None
 
     if ctx:
@@ -495,17 +495,16 @@ async def handle_create_recurring_event(args: dict, ctx=None) -> str:
                 )
             )
 
-            rrule_raw = result.content.text if hasattr(result.content, 'text') else str(result.content)
+            rrule_raw = result.content.text if hasattr(result.content, "text") else str(result.content)
             rrule = rrule_raw.strip()
 
-            # validate it starts with RRULE:
             if not rrule.startswith("RRULE:"):
                 rrule = f"RRULE:{rrule}" if not rrule.startswith("FREQ=") else f"RRULE:{rrule}"
 
         except Exception as e:
             logger.error(f"Sampling failed for RRULE generation: {e}")
 
-    # fallback — build basic RRULE from structured args if sampling unavailable
+    # fallback if sampling unavailable
     if not rrule:
         freq     = args.get("frequency", "WEEKLY").upper()
         interval = args.get("interval", 1)
@@ -521,18 +520,38 @@ async def handle_create_recurring_event(args: dict, ctx=None) -> str:
         elif until:
             rrule += f";UNTIL={until}"
 
-    # build the event
+    # 3. correct start date based on BYDAY in rrule
+    if rrule and "BYDAY=" in rrule:
+        day_map = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+        byday_match = re.search(r"BYDAY=([A-Z,]+)", rrule)
+        if byday_match:
+            days = [d.strip() for d in byday_match.group(1).split(",")]
+            target_weekdays = sorted([day_map[d] for d in days if d in day_map])
+            if target_weekdays:
+                current_weekday = start_dt.weekday()
+                days_ahead = None
+                for target in target_weekdays:
+                    diff = (target - current_weekday) % 7
+                    if days_ahead is None or diff < days_ahead:
+                        days_ahead = diff
+                if days_ahead and days_ahead > 0:
+                    start_dt = start_dt + timedelta(days=days_ahead)
+                    logger.info(f"Corrected start date to {start_dt.isoformat()} ({start_dt.strftime('%A')})")
+
+    # 4. build event with corrected start_dt
+    end_dt = start_dt + timedelta(minutes=duration)
+
     event_body = {
         "summary":     title,
         "description": description,
         "location":    location,
         "start": {
             "dateTime": start_dt.isoformat(),
-            "timeZone": timezone
+            "timeZone": tz
         },
         "end": {
             "dateTime": end_dt.isoformat(),
-            "timeZone": timezone
+            "timeZone": tz
         },
         "recurrence": [rrule],
         "reminders": {
@@ -543,6 +562,7 @@ async def handle_create_recurring_event(args: dict, ctx=None) -> str:
         }
     }
 
+    # 5. insert to Google Calendar
     svc = get_calendar_service()
     try:
         created = svc.events().insert(

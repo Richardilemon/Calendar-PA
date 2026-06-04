@@ -24,3 +24,13 @@ def setup_google_credentials():
     # ensure data directory exists
     data_dir = Path(os.getenv("CONTEXT_FILE", "./data/session_context.json")).parent
     data_dir.mkdir(parents=True, exist_ok=True)
+
+
+def refresh_google_token():
+    """Force a token refresh at startup to ensure it's valid."""
+    try:
+        from src.auth import get_calendar_service
+        get_calendar_service()
+        print("Google Calendar token refreshed successfully.")
+    except Exception as e:
+        print(f"Warning: Could not refresh Google token: {e}")
